@@ -1,0 +1,14 @@
+langgraph
+langchain-google-genai
+fastapi
+uvicorn[standard]
+pydantic
+langchain-chroma
+langchain-community
+langchain-text-splitters
+duckduckgo-search
+tavily-python
+sse-starlette
+python-multipart
+python-dotenv
+pypdf
