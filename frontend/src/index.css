@@ -1,0 +1,229 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  color-scheme: dark;
+  background-color: #0F1117;
+  color: #E2E4ED;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #252840;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #353860;
+}
+
+/* === Typing cursor animation === */
+.animate-pulse-cursor::after {
+  content: "▊";
+  color: #6C5CE7;
+  display: inline-block;
+  margin-left: 1px;
+  font-size: 0.9em;
+  animation: pulse-cursor 0.7s steps(2) infinite;
+}
+
+@keyframes pulse-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* === Research step connector line === */
+.step-connector {
+  position: relative;
+}
+
+.step-connector::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 24px;
+  bottom: -8px;
+  width: 2px;
+  background: linear-gradient(to bottom, #252840, transparent);
+}
+
+.step-connector:last-child::before {
+  display: none;
+}
+
+/* === Source card hover glow === */
+.source-card {
+  transition: all 0.2s ease;
+}
+
+.source-card:hover {
+  box-shadow: 0 0 20px rgba(108, 92, 231, 0.15);
+  border-color: rgba(108, 92, 231, 0.4);
+  transform: translateY(-1px);
+}
+
+/* === Shimmer loading effect === */
+.shimmer-bg {
+  background: linear-gradient(
+    90deg, 
+    #1C1F2E 25%, 
+    #252840 50%, 
+    #1C1F2E 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* === Toast notification === */
+.toast-enter {
+  animation: toastIn 0.3s ease-out forwards;
+}
+
+.toast-exit {
+  animation: toastOut 0.3s ease-in forwards;
+}
+
+@keyframes toastIn {
+  from {
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes toastOut {
+  from {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-10px) scale(0.95);
+    opacity: 0;
+  }
+}
+
+/* === Suggestion chip hover === */
+.suggestion-chip {
+  transition: all 0.2s ease;
+  border: 1px solid #252840;
+  background: rgba(28, 31, 46, 0.5);
+}
+
+.suggestion-chip:hover {
+  border-color: #6C5CE7;
+  background: rgba(108, 92, 231, 0.08);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.1);
+}
+
+/* === Markdown content styling === */
+.research-markdown h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #E2E4ED;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #252840;
+}
+
+.research-markdown h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #A29BFE;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.research-markdown p {
+  margin-bottom: 0.75rem;
+  line-height: 1.7;
+  color: #C8CAD8;
+}
+
+.research-markdown a {
+  color: #74B9FF;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.research-markdown a:hover {
+  border-bottom-color: #74B9FF;
+}
+
+.research-markdown ul, 
+.research-markdown ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.research-markdown li {
+  margin-bottom: 0.35rem;
+  color: #C8CAD8;
+}
+
+.research-markdown strong {
+  color: #E2E4ED;
+  font-weight: 600;
+}
+
+.research-markdown code {
+  background: rgba(108, 92, 231, 0.12);
+  color: #A29BFE;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+.research-markdown pre {
+  background: #0B0D14;
+  border: 1px solid #252840;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.research-markdown pre code {
+  background: none;
+  padding: 0;
+  color: #C8CAD8;
+}
+
+.research-markdown blockquote {
+  border-left: 3px solid #6C5CE7;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #6B7194;
+  font-style: italic;
+}
