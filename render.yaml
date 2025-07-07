@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: intelligent-research-architect-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: CHROMA_PERSIST_DIRECTORY
+        value: /var/data/chroma_db
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+    disk:
+      name: chroma-data
+      mountPath: /var/data
+      sizeGB: 1
