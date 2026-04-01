@@ -47,7 +47,7 @@ frontend/   React + Vite frontend
 ### 1. Clone the project
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/lohith2/Intelligent-Research-Architect.git
 cd "Intelligent Research Architect"
 ```
 
