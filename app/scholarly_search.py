@@ -29,7 +29,9 @@ STOPWORDS = {
     "on",
     "open",
     "or",
+    "paper",
     "papers",
+    "past",
     "phd",
     "published",
     "recent",
@@ -42,6 +44,8 @@ STOPWORDS = {
     "what",
     "were",
     "which",
+    "year",
+    "years",
 }
 
 CURRENT_YEAR = 2026
@@ -147,7 +151,7 @@ def extract_academic_intent(query: str, filters: Optional[List[str]] = None) -> 
         term in lowered for term in ["benchmark", "benchmarks", "evaluation", "dataset", "datasets"]
     )
     wants_recent = "recent" in normalized_filters or any(
-        term in lowered for term in ["recent", "latest", "since", "current"]
+        term in lowered for term in ["recent", "recently", "latest", "since", "current", "past few years", "last few years", "past several years", "last several years"]
     )
     wants_seminal = "seminal" in normalized_filters or "seminal" in lowered
     topic = normalized
@@ -437,7 +441,7 @@ def extract_year_constraints(query: str) -> Dict[str, Optional[int]]:
         else:
             min_year = year
             max_year = year
-    elif any(phrase in lowered for phrase in ["recent", "recently", "latest", "state of the art", "current"]):
+    elif any(phrase in lowered for phrase in ["recent", "recently", "latest", "state of the art", "current", "past few years", "last few years", "past several years", "last several years"]):
         min_year = CURRENT_YEAR - 3
 
     return {"min_year": min_year, "max_year": max_year}

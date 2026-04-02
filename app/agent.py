@@ -11,6 +11,7 @@ from app.scholarly_search import (
     build_nearby_topic_queries,
     build_provider_queries,
     count_recent_sources,
+    extract_academic_intent,
     fetch_openalex_related_works,
     format_sources_for_context,
     format_reading_path,
@@ -105,6 +106,73 @@ def _compress_context_segments(segments: List[str], max_segments: int = MAX_CONT
     return "\n\n".join(compressed)
 
 
+def _looks_like_document_query(question: str) -> bool:
+    lowered = question.lower()
+    explicit_document_phrases = [
+        "uploaded file",
+        "uploaded document",
+        "this pdf",
+        "that pdf",
+        "the pdf",
+        "this file",
+        "that file",
+        "the file",
+        "uploaded content",
+        "content of the file",
+        "content of this file",
+        "content of the pdf",
+        "summarize this document",
+        "summarize this pdf",
+    ]
+    return any(phrase in lowered for phrase in explicit_document_phrases)
+
+
+def _looks_like_conversational_follow_up(question: str, chat_history: List[dict]) -> bool:
+    if not chat_history:
+        return False
+
+    lowered = question.lower().strip()
+    if len(lowered) > 140:
+        return False
+
+    follow_up_prefixes = [
+        "why ",
+        "why did",
+        "why didn't",
+        "what happened",
+        "what do you mean",
+        "how so",
+        "can you explain",
+        "that doesn't",
+        "this doesn't",
+        "but ",
+        "then why",
+    ]
+    follow_up_markers = ["earlier", "before", "that", "this", "those", "these", "you", "your answer"]
+    lacks_research_terms = not any(
+        term in lowered
+        for term in [
+            "paper",
+            "papers",
+            "study",
+            "studies",
+            "research",
+            "benchmark",
+            "dataset",
+            "survey",
+            "review",
+            "citation",
+            "citations",
+            "arxiv",
+        ]
+    )
+
+    return (
+        any(lowered.startswith(prefix) for prefix in follow_up_prefixes)
+        or ("?" in lowered and any(marker in lowered for marker in follow_up_markers) and lacks_research_terms)
+    )
+
+
 def _build_query_aware_fallback_answer(question: str) -> str:
     normalized = normalize_query(question)
     base_topic = normalized or question.strip() or "this topic"
@@ -132,14 +200,19 @@ async def router_node(state: AgentState):
     """
     question = state["question"]
     filters = state.get("filters") or []
+    chat_history = state.get("chat_history", []) or []
     print(f"--- ROUTER: Analyzing '{question}' ---")
     
     q_lower = question.lower()
     
     # Keyword overrides for reliability
-    if any(k in q_lower for k in ["doc", "file", "pdf", "uploaded", "content of"]):
+    if _looks_like_document_query(question):
         print("--- ROUTER: Keyword detected -> VECTOR ---")
         return {"current_step": "routing_vector"}
+
+    if _looks_like_conversational_follow_up(question, chat_history):
+        print("--- ROUTER: Conversational follow-up detected -> CHAT ---")
+        return {"current_step": "routing_chat"}
 
     if filters or any(k in q_lower for k in ACADEMIC_KEYWORDS):
         print("--- ROUTER: Keyword detected -> ACADEMIC WEB ---")
@@ -155,7 +228,7 @@ async def router_node(state: AgentState):
         print("--- ROUTER: Keyword detected -> CHAT ---")
         return {"current_step": "routing_chat"}
 
-    if any(k in q_lower for k in ["why", "how", "compare", "evidence", "method", "methods", "benchmark", "benchmarks", "dataset", "datasets", "literature", "review"]):
+    if any(k in q_lower for k in ["compare", "evidence", "method", "methods", "benchmark", "benchmarks", "dataset", "datasets", "literature", "review"]):
         print("--- ROUTER: Defaulting analytical query -> ACADEMIC WEB ---")
         return {"current_step": "routing_web", "research_mode": "academic"}
 
@@ -212,10 +285,12 @@ async def search_node(state: AgentState):
     if research_mode == "academic":
         search_query = build_academic_query(question)
         provider_query = normalize_query(question)
+        academic_intent = extract_academic_intent(question, filters=filters)
         provider_queries = build_provider_queries(question, filters=filters)
         search_kwargs["include_domains"] = ACADEMIC_DOMAINS
         print(f"--- SEARCH: Searching academic sources for '{question}' ---")
     else:
+        academic_intent = None
         print(f"--- SEARCH: Searching Tavily for '{question}' ---")
     
     sources = []
@@ -260,9 +335,7 @@ async def search_node(state: AgentState):
 
             needs_nearby_fallback = (
                 len(sources) < 3
-                or ("recent" in filters and count_recent_sources(sources) < 2)
-                or ("recent" in question.lower() and count_recent_sources(sources) < 2)
-                or ("recently" in question.lower() and count_recent_sources(sources) < 2)
+                or (academic_intent and academic_intent.get("wants_recent") and count_recent_sources(sources) < 2)
             )
 
             if needs_nearby_fallback:

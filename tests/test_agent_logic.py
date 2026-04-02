@@ -1,10 +1,36 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.agent import generate_node, search_node
+from app.agent import generate_node, router_node, search_node
 
 
 class AgentLogicTests(unittest.IsolatedAsyncioTestCase):
+    async def test_router_treats_follow_up_complaint_as_chat(self):
+        result = await router_node(
+            {
+                "question": "why didnt you give them earlier",
+                "chat_history": [
+                    {"role": "user", "content": "give me paper on robotics published in the past few years"},
+                    {"role": "assistant", "content": "I couldn't find enough relevant scholarly sources."},
+                ],
+                "filters": [],
+            }
+        )
+
+        self.assertEqual(result["current_step"], "routing_chat")
+
+    async def test_router_does_not_treat_pasted_pdf_tokens_as_document_query(self):
+        result = await router_node(
+            {
+                "question": "give me paper on robotics published in the past few years [pdf, html, other]",
+                "chat_history": [],
+                "filters": [],
+            }
+        )
+
+        self.assertEqual(result["current_step"], "routing_web")
+        self.assertEqual(result["research_mode"], "academic")
+
     async def test_generate_node_refuses_unsourced_academic_summary(self):
         state = {
             "question": "recent papers on e commerce",

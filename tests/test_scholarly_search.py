@@ -50,6 +50,11 @@ class ScholarlySearchTests(unittest.TestCase):
         self.assertEqual(constraints["min_year"], 2023)
         self.assertIsNone(constraints["max_year"])
 
+    def test_past_few_years_query_sets_last_three_year_window(self):
+        constraints = extract_year_constraints("papers on robotics published in the past few years")
+        self.assertEqual(constraints["min_year"], 2023)
+        self.assertIsNone(constraints["max_year"])
+
     def test_recent_filter_prefers_newer_matching_paper(self):
         results = [
             {
