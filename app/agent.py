@@ -8,7 +8,9 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.state import AgentState
 from app.vector_store import add_documents, search_documents
 from app.scholarly_search import (
+    build_nearby_topic_queries,
     build_provider_queries,
+    count_recent_sources,
     fetch_openalex_related_works,
     format_sources_for_context,
     format_reading_path,
@@ -201,18 +203,27 @@ async def search_node(state: AgentState):
     
     try:
         if research_mode == "academic":
-            provider_results: List[dict] = []
-            for provider in (
-                search_semantic_scholar,
-                search_openalex,
-                search_arxiv,
-                search_crossref,
-            ):
-                try:
+            def _run_provider_bundle(provider_queries_map: dict) -> List[dict]:
+                bundled_results: List[dict] = []
+                for provider in (
+                    search_semantic_scholar,
+                    search_openalex,
+                    search_arxiv,
+                    search_crossref,
+                ):
                     provider_name = provider.__name__.replace("search_", "")
-                    provider_results.extend(provider(provider_queries.get(provider_name, provider_query)))
-                except Exception as provider_err:
-                    print(f"--- SEARCH WARNING: {provider.__name__} failed: {provider_err} ---")
+                    query_values = provider_queries_map.get(provider_name, provider_query)
+                    if isinstance(query_values, str):
+                        query_values = [query_values]
+                    for query_value in query_values:
+                        try:
+                            bundled_results.extend(provider(query_value))
+                        except Exception as provider_err:
+                            print(f"--- SEARCH WARNING: {provider.__name__} failed for '{query_value}': {provider_err} ---")
+                return bundled_results
+
+            provider_results: List[dict] = []
+            provider_results.extend(_run_provider_bundle(provider_queries))
 
             sources = rank_sources(question, provider_results, limit=8, filters=filters)
             expanded_results = list(sources)
@@ -226,6 +237,26 @@ async def search_node(state: AgentState):
             reading_path = format_reading_path(sources)
             if reading_path:
                 results_text += f"\n\n{reading_path}"
+
+            needs_nearby_fallback = (
+                len(sources) < 3
+                or ("recent" in filters and count_recent_sources(sources) < 2)
+                or ("recent" in question.lower() and count_recent_sources(sources) < 2)
+                or ("recently" in question.lower() and count_recent_sources(sources) < 2)
+            )
+
+            if needs_nearby_fallback:
+                nearby_queries = build_nearby_topic_queries(question, filters=filters)
+                if nearby_queries:
+                    nearby_provider_queries = {
+                        "semantic_scholar": nearby_queries,
+                        "openalex": [f"{query_value} primary study".strip() for query_value in nearby_queries],
+                        "arxiv": nearby_queries,
+                        "crossref": nearby_queries,
+                    }
+                    nearby_results = _run_provider_bundle(nearby_provider_queries)
+                    if nearby_results:
+                        sources = rank_sources(question, sources + nearby_results, limit=8, filters=filters)
 
             # Fallback to Tavily with academic-domain filters if the scholarly providers are sparse
             if len(sources) < 4:

@@ -1,6 +1,6 @@
 import unittest
 
-from app.scholarly_search import extract_year_constraints, rank_sources
+from app.scholarly_search import build_nearby_topic_queries, extract_year_constraints, rank_sources
 
 
 class ScholarlySearchTests(unittest.TestCase):
@@ -45,6 +45,11 @@ class ScholarlySearchTests(unittest.TestCase):
         self.assertEqual(constraints["min_year"], 2023)
         self.assertIsNone(constraints["max_year"])
 
+    def test_recently_query_sets_last_three_year_window(self):
+        constraints = extract_year_constraints("papers on robotics published recently")
+        self.assertEqual(constraints["min_year"], 2023)
+        self.assertIsNone(constraints["max_year"])
+
     def test_recent_filter_prefers_newer_matching_paper(self):
         results = [
             {
@@ -78,6 +83,11 @@ class ScholarlySearchTests(unittest.TestCase):
         ranked = rank_sources("robotics planning survey", results, limit=2, filters=["recent", "survey"])
 
         self.assertEqual(ranked[0]["title"], "Recent Robotics Planning Survey")
+
+    def test_broad_robotics_query_expands_to_nearby_subtopics(self):
+        nearby_queries = build_nearby_topic_queries("recent papers on robotics", filters=["recent"])
+        self.assertIn("robot manipulation recent state of the art", nearby_queries)
+        self.assertIn("robot navigation recent state of the art", nearby_queries)
 
 
 if __name__ == "__main__":

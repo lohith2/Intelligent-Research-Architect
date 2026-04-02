@@ -12,8 +12,10 @@ STOPWORDS = {
     "and",
     "are",
     "as",
+    "few",
     "for",
     "from",
+    "give",
     "how",
     "i",
     "important",
@@ -29,6 +31,7 @@ STOPWORDS = {
     "or",
     "papers",
     "phd",
+    "published",
     "recent",
     "should",
     "student",
@@ -37,6 +40,7 @@ STOPWORDS = {
     "their",
     "to",
     "what",
+    "were",
     "which",
 }
 
@@ -84,6 +88,46 @@ EXCLUSION_TERMS_BY_TOPIC = {
 }
 
 RESEARCH_FILTERS = {"recent", "survey", "benchmark", "seminal"}
+TOKEN_ALIASES = {
+    "robotics": "robot",
+    "robotic": "robot",
+}
+
+BROAD_TOPIC_EXPANSIONS = {
+    "robotics": [
+        "robot manipulation",
+        "robot navigation",
+        "robot learning",
+        "humanoid robotics",
+        "human robot interaction",
+        "soft robotics",
+    ],
+    "robotic": [
+        "robot manipulation",
+        "robot navigation",
+        "robot learning",
+        "humanoid robotics",
+        "human robot interaction",
+    ],
+    "vision": [
+        "computer vision detection",
+        "vision language models",
+        "image segmentation",
+        "video understanding",
+    ],
+    "nlp": [
+        "language modeling",
+        "information extraction",
+        "question answering",
+        "retrieval augmented generation",
+    ],
+    "multimodal": [
+        "vision language models",
+        "multimodal reasoning",
+        "audio visual understanding",
+        "embodied multimodal agents",
+    ],
+}
 
 
 def _normalize_filters(filters: Optional[List[str]]) -> List[str]:
@@ -135,6 +179,35 @@ def build_provider_queries(query: str, filters: Optional[List[str]] = None) -> D
         "arxiv": f"{topic}{benchmark_terms}{survey_terms}{recent_terms}".strip(),
         "crossref": f"{topic}{survey_terms}{benchmark_terms}{seminal_terms}".strip(),
     }
+
+
+def build_nearby_topic_queries(query: str, filters: Optional[List[str]] = None, limit: int = 4) -> List[str]:
+    intent = extract_academic_intent(query, filters=filters)
+    topic = intent["topic"]
+    topic_tokens = [token for token in re.findall(r"[a-z0-9]+", topic.lower()) if token]
+    expansions: List[str] = []
+
+    for token in topic_tokens:
+        if token in BROAD_TOPIC_EXPANSIONS:
+            expansions.extend(BROAD_TOPIC_EXPANSIONS[token])
+
+    deduped_expansions: List[str] = []
+    seen = set()
+    for expansion in expansions:
+        normalized = expansion.lower().strip()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped_expansions.append(expansion)
+
+    recent_terms = " recent state of the art" if intent["wants_recent"] else ""
+    survey_terms = " survey review" if intent["wants_survey"] else ""
+    benchmark_terms = " benchmark evaluation dataset" if intent["wants_benchmark"] else ""
+
+    return [
+        f"{expansion}{survey_terms}{benchmark_terms}{recent_terms}".strip()
+        for expansion in deduped_expansions[:limit]
+    ]
 
 
 def _read_json(url: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -254,6 +327,8 @@ def _has_strong_quality_signal(item: Dict[str, Any]) -> bool:
 
 def _canonicalize_token(token: str) -> str:
     token = (token or "").lower().strip()
+    if token in TOKEN_ALIASES:
+        return TOKEN_ALIASES[token]
     if len(token) > 4 and token.endswith("s"):
         return token[:-1]
     return token
@@ -362,10 +437,20 @@ def extract_year_constraints(query: str) -> Dict[str, Optional[int]]:
         else:
             min_year = year
             max_year = year
-    elif any(phrase in lowered for phrase in ["recent", "latest", "state of the art", "current"]):
+    elif any(phrase in lowered for phrase in ["recent", "recently", "latest", "state of the art", "current"]):
         min_year = CURRENT_YEAR - 3
 
     return {"min_year": min_year, "max_year": max_year}
+
+
+def count_recent_sources(sources: List[Dict[str, str]], window_years: int = 3) -> int:
+    threshold = CURRENT_YEAR - window_years
+    recent_count = 0
+    for item in sources:
+        year_value = str(item.get("year", "")).strip()
+        if year_value.isdigit() and int(year_value) >= threshold:
+            recent_count += 1
+    return recent_count
 
 
 def _within_year_constraints(item: Dict[str, str], constraints: Dict[str, Optional[int]]) -> bool:

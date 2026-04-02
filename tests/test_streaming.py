@@ -29,6 +29,10 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
     async def test_streaming_does_not_duplicate_final_answer_when_tokens_streamed(self):
         payloads = await self._collect_payloads(
             [
+                {"event": "on_chain_start", "name": "grade", "data": {}},
+                {"event": "on_chat_model_stream", "data": {"chunk": _Chunk("NO")}},
+                {"event": "on_chain_end", "name": "grade", "data": {"output": {"grade_passed": False}}},
+                {"event": "on_chain_start", "name": "generate", "data": {}},
                 {"event": "on_chat_model_stream", "data": {"chunk": _Chunk("Hel")}},
                 {"event": "on_chat_model_stream", "data": {"chunk": _Chunk("lo")}},
                 {

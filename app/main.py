@@ -88,6 +88,7 @@ class ResearchRequest(BaseModel):
 async def stream_research_events(request: ResearchRequest, runnable=None):
     """Yield research SSE payloads for a request."""
     streamed_answer_tokens = False
+    answer_stream_active = False
     runnable = runnable or agent_runnable
     initial_state = {
         "question": request.query,
@@ -106,7 +107,7 @@ async def stream_research_events(request: ResearchRequest, runnable=None):
 
         if kind == "on_chat_model_stream":
             chunk = event["data"]["chunk"]
-            if hasattr(chunk, "content") and chunk.content:
+            if answer_stream_active and hasattr(chunk, "content") and chunk.content:
                 streamed_answer_tokens = True
                 yield json.dumps({"token": chunk.content})
 
@@ -121,6 +122,7 @@ async def stream_research_events(request: ResearchRequest, runnable=None):
             elif node_name == "grade":
                 yield json.dumps({"step": {"name": "grade", "status": "running", "label": "Evaluating relevance..."}})
             elif node_name in ("generate", "generate_chat"):
+                answer_stream_active = True
                 yield json.dumps({"step": {"name": "generate", "status": "running", "label": "Synthesizing answer..."}})
 
         elif kind == "on_chain_end":
@@ -153,6 +155,7 @@ async def stream_research_events(request: ResearchRequest, runnable=None):
                 answer = output.get("answer", "")
                 if answer and not streamed_answer_tokens:
                     yield json.dumps({"token": answer})
+                answer_stream_active = False
                 yield json.dumps({"step": {"name": "generate", "status": "done", "label": "Complete"}})
 
     yield json.dumps({"done": True})
