@@ -104,6 +104,26 @@ def _compress_context_segments(segments: List[str], max_segments: int = MAX_CONT
 
     return "\n\n".join(compressed)
 
+
+def _build_query_aware_fallback_answer(question: str) -> str:
+    normalized = normalize_query(question)
+    base_topic = normalized or question.strip() or "this topic"
+    topic_words = [word for word in base_topic.split() if word]
+    concise_topic = " ".join(topic_words[:4]) if topic_words else "this topic"
+    nearby_examples = [
+        f"recent papers on {concise_topic}",
+        f"survey papers on {concise_topic}",
+        f"benchmarks or evaluation papers for {concise_topic}",
+        f"{concise_topic} papers since 2024",
+    ]
+    bullet_list = "\n".join(f"- {example}" for example in nearby_examples)
+    return (
+        f"I couldn't find enough relevant scholarly sources for '{question}' to answer reliably from evidence.\n\n"
+        "Try narrowing or reframing the search, for example:\n"
+        f"{bullet_list}\n\n"
+        "If you'd like, I can help rephrase the query so it targets papers more precisely."
+    )
+
 # --- Nodes ---
 
 async def router_node(state: AgentState):
@@ -412,15 +432,7 @@ async def generate_node(state: AgentState):
         return {
             "steps_taken": state.get("steps_taken", []) + ["generate"],
             "current_step": "complete",
-            "answer": (
-                "I couldn't find relevant scholarly sources for this query, so I can't reliably summarize recent diffusion model papers from evidence.\n\n"
-                "Try narrowing the request, for example:\n"
-                "- recent text-to-image diffusion papers\n"
-                "- diffusion transformers papers since 2024\n"
-                "- sampling efficiency papers for diffusion models\n"
-                "- controllability and editing limitations in diffusion papers\n\n"
-                "If you'd like, I can help rephrase the search so it targets papers more precisely."
-            ),
+            "answer": _build_query_aware_fallback_answer(question),
             "research_mode": research_mode,
             "filters": filters,
             "sources": [],

@@ -7,7 +7,7 @@ from app.agent import generate_node, search_node
 class AgentLogicTests(unittest.IsolatedAsyncioTestCase):
     async def test_generate_node_refuses_unsourced_academic_summary(self):
         state = {
-            "question": "Summarize recent robotics papers",
+            "question": "recent papers on e commerce",
             "chat_id": "chat-1",
             "research_mode": "academic",
             "filters": ["recent"],
@@ -24,7 +24,9 @@ class AgentLogicTests(unittest.IsolatedAsyncioTestCase):
             result = await generate_node(state)
 
         add_documents_mock.assert_awaited()
-        self.assertIn("couldn't find relevant scholarly sources", result["answer"].lower())
+        self.assertIn("couldn't find enough relevant scholarly sources", result["answer"].lower())
+        self.assertIn("e commerce", result["answer"].lower())
+        self.assertNotIn("diffusion", result["answer"].lower())
         self.assertEqual(result["sources"], [])
 
     async def test_search_node_uses_nearby_robotics_queries_when_initial_results_are_sparse(self):
