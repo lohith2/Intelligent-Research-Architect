@@ -69,6 +69,28 @@ ACADEMIC_DOMAINS = [
 MAX_CONTEXT_SEGMENTS = 6
 MAX_CONTEXT_CHARS = 14000
 MAX_SEGMENT_CHARS = 2400
+FOLLOW_UP_SEARCH_TERMS = [
+    "latest",
+    "recent",
+    "recently",
+    "after",
+    "before",
+    "since",
+    "newer",
+    "older",
+    "more",
+    "another",
+    "others",
+    "only",
+    "surveys",
+    "survey",
+    "benchmarks",
+    "benchmark",
+    "papers",
+    "paper",
+    "citations",
+    "citation",
+]
 
 
 def build_academic_query(question: str) -> str:
@@ -192,6 +214,62 @@ def _build_query_aware_fallback_answer(question: str) -> str:
         "If you'd like, I can help rephrase the query so it targets papers more precisely."
     )
 
+
+def _extract_recent_user_messages(chat_history: List[dict], limit: int = 6) -> List[str]:
+    messages: List[str] = []
+    for item in reversed(chat_history or []):
+        role = item.get("role") if isinstance(item, dict) else getattr(item, "role", None)
+        content = item.get("content") if isinstance(item, dict) else getattr(item, "content", "")
+        if role == "user" and content:
+            messages.append(str(content))
+        if len(messages) >= limit:
+            break
+    return list(reversed(messages))
+
+
+def _infer_prior_research_mode(chat_history: List[dict]) -> str:
+    recent_user_messages = _extract_recent_user_messages(chat_history)
+    for previous in reversed(recent_user_messages):
+        lowered = previous.lower()
+        if any(term in lowered for term in ACADEMIC_KEYWORDS):
+            return "academic"
+        if any(term in lowered for term in ["latest", "current", "news", "price", "weather", "today", "statistics"]):
+            return "web"
+    return ""
+
+
+def _looks_like_refinement_turn(question: str) -> bool:
+    lowered = question.lower().strip()
+    if not lowered or len(lowered) > 180:
+        return False
+    if any(term in lowered for term in FOLLOW_UP_SEARCH_TERMS):
+        return True
+    if any(char.isdigit() for char in lowered):
+        return True
+    if len(lowered.split()) <= 8:
+        return True
+    return False
+
+
+def _resolve_conversation_intent(question: str, chat_history: List[dict], filters: List[str]) -> dict:
+    if not chat_history:
+        return {"kind": "fresh"}
+
+    if _looks_like_document_query(question):
+        return {"kind": "document"}
+
+    if _looks_like_conversational_follow_up(question, chat_history):
+        return {"kind": "chat"}
+
+    prior_mode = _infer_prior_research_mode(chat_history)
+    if prior_mode and _looks_like_refinement_turn(question):
+        return {"kind": "refine", "research_mode": prior_mode}
+
+    if filters:
+        return {"kind": "fresh", "research_mode": "academic"}
+
+    return {"kind": "fresh"}
+
 # --- Nodes ---
 
 async def router_node(state: AgentState):
@@ -204,15 +282,21 @@ async def router_node(state: AgentState):
     print(f"--- ROUTER: Analyzing '{question}' ---")
     
     q_lower = question.lower()
+    conversation_intent = _resolve_conversation_intent(question, chat_history, filters)
     
     # Keyword overrides for reliability
-    if _looks_like_document_query(question):
+    if conversation_intent.get("kind") == "document":
         print("--- ROUTER: Keyword detected -> VECTOR ---")
         return {"current_step": "routing_vector"}
 
-    if _looks_like_conversational_follow_up(question, chat_history):
+    if conversation_intent.get("kind") == "chat":
         print("--- ROUTER: Conversational follow-up detected -> CHAT ---")
         return {"current_step": "routing_chat"}
+
+    if conversation_intent.get("kind") == "refine":
+        inherited_mode = conversation_intent.get("research_mode") or "web"
+        print(f"--- ROUTER: Refinement turn detected -> {inherited_mode.upper()} ---")
+        return {"current_step": "routing_web", "research_mode": inherited_mode}
 
     if filters or any(k in q_lower for k in ACADEMIC_KEYWORDS):
         print("--- ROUTER: Keyword detected -> ACADEMIC WEB ---")

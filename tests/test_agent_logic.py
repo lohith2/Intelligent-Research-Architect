@@ -19,6 +19,36 @@ class AgentLogicTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["current_step"], "routing_chat")
 
+    async def test_router_inherits_paper_research_mode_for_short_refinement(self):
+        result = await router_node(
+            {
+                "question": "latest ones after 2025?",
+                "chat_history": [
+                    {"role": "user", "content": "i need some papers on data engineering"},
+                    {"role": "assistant", "content": "Here are papers on data engineering."},
+                ],
+                "filters": [],
+            }
+        )
+
+        self.assertEqual(result["current_step"], "routing_web")
+        self.assertEqual(result["research_mode"], "academic")
+
+    async def test_router_inherits_web_research_mode_for_short_refinement(self):
+        result = await router_node(
+            {
+                "question": "what about today?",
+                "chat_history": [
+                    {"role": "user", "content": "what is the weather in san francisco"},
+                    {"role": "assistant", "content": "Here is the forecast."},
+                ],
+                "filters": [],
+            }
+        )
+
+        self.assertEqual(result["current_step"], "routing_web")
+        self.assertEqual(result["research_mode"], "web")
+
     async def test_router_does_not_treat_pasted_pdf_tokens_as_document_query(self):
         result = await router_node(
             {
