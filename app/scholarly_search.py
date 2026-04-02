@@ -252,6 +252,47 @@ def _has_strong_quality_signal(item: Dict[str, Any]) -> bool:
     return citation_count >= 20 or trust > 0 or role in {"survey", "benchmark"}
 
 
+def _canonicalize_token(token: str) -> str:
+    token = (token or "").lower().strip()
+    if len(token) > 4 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def _query_overlap_count(query: str, item: Dict[str, Any]) -> int:
+    normalized_query = normalize_query(query)
+    query_tokens = {_canonicalize_token(token) for token in re.findall(r"[a-z0-9]+", normalized_query)}
+    haystack_tokens = {
+        _canonicalize_token(token)
+        for token in re.findall(
+            r"[a-z0-9]+",
+            " ".join(
+                [
+                    str(item.get("title", "")).lower(),
+                    str(item.get("snippet", "")).lower(),
+                    str(item.get("abstract", "")).lower(),
+                    str(item.get("venue", "")).lower(),
+                ]
+            ),
+        )
+    }
+    query_tokens = {token for token in query_tokens if token}
+    haystack_tokens = {token for token in haystack_tokens if token}
+    return len(query_tokens & haystack_tokens)
+
+
+def _has_min_topic_overlap(query: str, item: Dict[str, Any]) -> bool:
+    normalized_query = normalize_query(query)
+    query_tokens = [_canonicalize_token(token) for token in re.findall(r"[a-z0-9]+", normalized_query)]
+    query_tokens = [token for token in query_tokens if token]
+    if not query_tokens:
+        return True
+
+    overlap = _query_overlap_count(query, item)
+    required_overlap = 1 if len(set(query_tokens)) <= 2 else 2
+    return overlap >= required_overlap
+
+
 def _is_seed_candidate_relevant(query: str, item: Dict[str, Any]) -> bool:
     lowered_query = query.lower()
     normalized_query = normalize_query(query)
@@ -266,6 +307,9 @@ def _is_seed_candidate_relevant(query: str, item: Dict[str, Any]) -> bool:
     role = item.get("paper_role") or classify_paper_role(item)
 
     if _topic_exclusion_hit(query, item):
+        return False
+
+    if not _has_min_topic_overlap(query, item):
         return False
 
     if "retrieval augmented generation" in normalized_query and "retrieval augmented generation" not in haystack:
@@ -357,6 +401,12 @@ def _score_source(query: str, item: Dict[str, str], filters: Optional[List[str]]
         if token in haystack:
             score += 3 if token in item.get("title", "").lower() else 1
 
+    overlap = _query_overlap_count(query, item)
+    if overlap == 0:
+        score -= 8
+    elif overlap >= 2:
+        score += 2
+
     if _topic_exclusion_hit(query, item):
         score -= 8
 
@@ -408,7 +458,7 @@ def _score_source(query: str, item: Dict[str, str], filters: Optional[List[str]]
         if "recent" in query.lower() or "latest" in query.lower():
             score += max(0, year - (CURRENT_YEAR - 5))
         if "recent" in normalized_filters:
-            score += max(0, year - (CURRENT_YEAR - 4))
+            score += max(0, year - (CURRENT_YEAR - 4)) * 2
     except (TypeError, ValueError):
         pass
     if "seminal" in normalized_filters:

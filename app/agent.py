@@ -63,6 +63,10 @@ ACADEMIC_DOMAINS = [
     "ieeexplore.ieee.org",
 ]
 
+MAX_CONTEXT_SEGMENTS = 6
+MAX_CONTEXT_CHARS = 14000
+MAX_SEGMENT_CHARS = 2400
+
 
 def build_academic_query(question: str) -> str:
     normalized = normalize_query(question)
@@ -70,6 +74,33 @@ def build_academic_query(question: str) -> str:
         f"{normalized} research papers journal articles arxiv "
         f"systematic review benchmark dataset evaluation"
     )
+
+
+def _trim_text(value: str, max_chars: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _compress_context_segments(segments: List[str], max_segments: int = MAX_CONTEXT_SEGMENTS) -> str:
+    cleaned_segments = [_trim_text(segment, MAX_SEGMENT_CHARS) for segment in segments if segment and segment.strip()]
+    if len(cleaned_segments) > max_segments:
+        cleaned_segments = cleaned_segments[:max_segments]
+
+    compressed: List[str] = []
+    total = 0
+    for segment in cleaned_segments:
+        remaining = MAX_CONTEXT_CHARS - total
+        if remaining <= 0:
+            break
+        clipped = _trim_text(segment, min(MAX_SEGMENT_CHARS, remaining))
+        if not clipped:
+            continue
+        compressed.append(clipped)
+        total += len(clipped)
+
+    return "\n\n".join(compressed)
 
 # --- Nodes ---
 
@@ -204,7 +235,7 @@ async def search_node(state: AgentState):
                     {
                         "title": r.get("title", "Unknown"),
                         "url": r.get("url", ""),
-                        "snippet": _snippet if (_snippet := r.get("content", "")[:280]) else "",
+                        "snippet": (r.get("content", "")[:280] if r.get("content", "") else ""),
                     }
                     for r in results_list
                     if r.get("url")
@@ -343,7 +374,26 @@ async def generate_node(state: AgentState):
     
     # Combine context
     web_context = state.get("context", [])
-    combined_context_str = "\n".join(web_context + vector_context)
+    combined_context_str = _compress_context_segments(web_context + vector_context)
+    sources = state.get("sources", [])
+
+    if research_mode == "academic" and not sources:
+        return {
+            "steps_taken": state.get("steps_taken", []) + ["generate"],
+            "current_step": "complete",
+            "answer": (
+                "I couldn't find relevant scholarly sources for this query, so I can't reliably summarize recent diffusion model papers from evidence.\n\n"
+                "Try narrowing the request, for example:\n"
+                "- recent text-to-image diffusion papers\n"
+                "- diffusion transformers papers since 2024\n"
+                "- sampling efficiency papers for diffusion models\n"
+                "- controllability and editing limitations in diffusion papers\n\n"
+                "If you'd like, I can help rephrase the search so it targets papers more precisely."
+            ),
+            "research_mode": research_mode,
+            "filters": filters,
+            "sources": [],
+        }
     
     # Format chat history
     history_messages = []
@@ -360,11 +410,10 @@ async def generate_node(state: AgentState):
                 history_messages.append(AIMessage(content=content))
     
     # Build source reference for the prompt
-    sources = state.get("sources", [])
     source_list_str = ""
     if sources:
         source_list_str = "\n\nAvailable Sources:\n" + "\n".join(
-            [f"- [{s['title']}]({s['url']})" for s in sources if s.get('url')]
+            [f"- [{s['title']}]({s['url']})" for s in sources[:8] if s.get('url')]
         )
     
     # Grade warning
@@ -373,7 +422,8 @@ async def generate_node(state: AgentState):
         grade_warning = """
 ⚠️ IMPORTANT: The search results were graded as NOT highly relevant to this question.
 Inform the user that the sources found may not fully address their query, 
-and suggest they refine their research question for better results."""
+and suggest they refine their research question for better results.
+Do NOT fill the gaps with an unsourced literature summary or broad academic background."""
 
     filter_rules = ""
     if research_mode == "academic" and filters:
@@ -386,6 +436,7 @@ and suggest they refine their research question for better results."""
 - If evidence is mixed, compare methods, datasets, and limitations instead of pretending there is consensus.
 - Distinguish between survey/review claims and primary empirical findings.
 - If the sources look weak, sparse, or non-academic, say so clearly.
+- If there are too few relevant sources to answer confidently, stop and say that instead of using general background knowledge as if it came from papers.
 - Highlight research gaps, unresolved questions, and what a PhD student should read next.
 - When the context includes a reading path, turn it into a staged reading recommendation: foundational -> benchmark/survey -> current frontier.
 - For paper-oriented questions, structure as: Research Question → Key Papers → Datasets/Metrics → Methodological Notes → Limitations/Gaps → Reading List → Sources.

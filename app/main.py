@@ -85,83 +85,83 @@ class ResearchRequest(BaseModel):
     messages: List[Message] = []
     filters: List[str] = []
 
+async def stream_research_events(request: ResearchRequest, runnable=None):
+    """Yield research SSE payloads for a request."""
+    streamed_answer_tokens = False
+    runnable = runnable or agent_runnable
+    initial_state = {
+        "question": request.query,
+        "filters": request.filters,
+        "context": [],
+        "steps_taken": [],
+        "chat_id": request.chat_id,
+        "chat_history": request.messages,
+        "sources": [],
+        "grade_passed": None,
+        "research_mode": None,
+    }
+
+    async for event in runnable.astream_events(initial_state, version="v2"):
+        kind = event["event"]
+
+        if kind == "on_chat_model_stream":
+            chunk = event["data"]["chunk"]
+            if hasattr(chunk, "content") and chunk.content:
+                streamed_answer_tokens = True
+                yield json.dumps({"token": chunk.content})
+
+        elif kind == "on_chain_start":
+            node_name = event.get("name", "")
+            if node_name == "router":
+                yield json.dumps({"step": {"name": "router", "status": "running", "label": "Analyzing query..."}})
+            elif node_name == "search":
+                mode = event.get("data", {}).get("input", {}).get("research_mode")
+                label = "Searching papers..." if mode == "academic" else "Searching the web..."
+                yield json.dumps({"step": {"name": "search", "status": "running", "label": label}})
+            elif node_name == "grade":
+                yield json.dumps({"step": {"name": "grade", "status": "running", "label": "Evaluating relevance..."}})
+            elif node_name in ("generate", "generate_chat"):
+                yield json.dumps({"step": {"name": "generate", "status": "running", "label": "Synthesizing answer..."}})
+
+        elif kind == "on_chain_end":
+            node_name = event.get("name", "")
+            output = event.get("data", {}).get("output", {})
+
+            if node_name == "router":
+                step = output.get("current_step", "")
+                route_label = {
+                    "routing_web": "Web Research",
+                    "routing_vector": "Document Search",
+                    "routing_chat": "Conversation"
+                }.get(step, step)
+                if step == "routing_web" and output.get("research_mode") == "academic":
+                    route_label = "Paper Research"
+                yield json.dumps({"step": {"name": "router", "status": "done", "label": f"Route: {route_label}"}})
+
+            elif node_name == "search":
+                sources = output.get("sources", [])
+                yield json.dumps({"step": {"name": "search", "status": "done", "label": f"Found {len(sources)} sources"}})
+                if sources:
+                    yield json.dumps({"sources": sources})
+
+            elif node_name == "grade":
+                passed = output.get("grade_passed", True)
+                label = "Results relevant ✓" if passed else "Low relevance ⚠️"
+                yield json.dumps({"step": {"name": "grade", "status": "done", "label": label}})
+
+            elif node_name in ("generate", "generate_chat"):
+                answer = output.get("answer", "")
+                if answer and not streamed_answer_tokens:
+                    yield json.dumps({"token": answer})
+                yield json.dumps({"step": {"name": "generate", "status": "done", "label": "Complete"}})
+
+    yield json.dumps({"done": True})
+
+
 @app.post("/research")
 async def research_endpoint(request: ResearchRequest):
     """Stream research results via SSE with real token-level streaming."""
-    
-    async def event_generator():
-        initial_state = {
-            "question": request.query,
-            "filters": request.filters,
-            "context": [],
-            "steps_taken": [],
-            "chat_id": request.chat_id,
-            "chat_history": request.messages,
-            "sources": [],
-            "grade_passed": None,
-            "research_mode": None,
-        }
-        
-        async for event in agent_runnable.astream_events(initial_state, version="v2"):
-            kind = event["event"]
-            
-            # 1. Stream individual tokens from the LLM
-            if kind == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                if hasattr(chunk, "content") and chunk.content:
-                    yield json.dumps({"token": chunk.content})
-                    
-            # 2. Node lifecycle events for step tracking
-            elif kind == "on_chain_start":
-                node_name = event.get("name", "")
-                if node_name == "router":
-                    yield json.dumps({"step": {"name": "router", "status": "running", "label": "Analyzing query..."}})
-                elif node_name == "search":
-                    mode = event.get("data", {}).get("input", {}).get("research_mode")
-                    label = "Searching papers..." if mode == "academic" else "Searching the web..."
-                    yield json.dumps({"step": {"name": "search", "status": "running", "label": label}})
-                elif node_name == "grade":
-                    yield json.dumps({"step": {"name": "grade", "status": "running", "label": "Evaluating relevance..."}})
-                elif node_name in ("generate", "generate_chat"):
-                    yield json.dumps({"step": {"name": "generate", "status": "running", "label": "Synthesizing answer..."}})
-                    
-            elif kind == "on_chain_end":
-                node_name = event.get("name", "")
-                output = event.get("data", {}).get("output", {})
-                
-                if node_name == "router":
-                    step = output.get("current_step", "")
-                    route_label = {
-                        "routing_web": "Web Research",
-                        "routing_vector": "Document Search", 
-                        "routing_chat": "Conversation"
-                    }.get(step, step)
-                    if step == "routing_web" and output.get("research_mode") == "academic":
-                        route_label = "Paper Research"
-                    yield json.dumps({"step": {"name": "router", "status": "done", "label": f"Route: {route_label}"}})
-                    
-                elif node_name == "search":
-                    sources = output.get("sources", [])
-                    yield json.dumps({"step": {"name": "search", "status": "done", "label": f"Found {len(sources)} sources"}})
-                    # Send sources
-                    if sources:
-                        yield json.dumps({"sources": sources})
-                        sources_sent = True
-                        
-                elif node_name == "grade":
-                    passed = output.get("grade_passed", True)
-                    label = "Results relevant ✓" if passed else "Low relevance ⚠️"
-                    yield json.dumps({"step": {"name": "grade", "status": "done", "label": label}})
-                    
-                elif node_name in ("generate", "generate_chat"):
-                    answer = output.get("answer", "")
-                    if answer:
-                        yield json.dumps({"token": answer})
-                    yield json.dumps({"step": {"name": "generate", "status": "done", "label": "Complete"}})
-        
-        yield json.dumps({"done": True})
-    
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(stream_research_events(request))
 
 @app.post("/upload")
 async def upload_file(

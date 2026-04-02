@@ -10,7 +10,8 @@ async def process_file(file_content: bytes, filename: str) -> str:
         try:
             reader = PdfReader(io.BytesIO(file_content))
             for page in reader.pages:
-                text += page.extract_text() + "\n"
+                page_text = page.extract_text() or ""
+                text += page_text + "\n"
         except Exception as e:
             return f"Error reading PDF: {str(e)}"
     else:
