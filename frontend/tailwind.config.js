@@ -9,24 +9,26 @@ export default {
     theme: {
         extend: {
             fontFamily: {
-                sans: ['Inter', 'system-ui', 'sans-serif'],
+                sans: ['"IBM Plex Sans"', '"Avenir Next"', '"Segoe UI"', 'sans-serif'],
+                serif: ['"Iowan Old Style"', '"Palatino Linotype"', '"Book Antiqua"', 'serif'],
+                mono: ['"IBM Plex Mono"', '"SFMono-Regular"', 'monospace'],
             },
             colors: {
-                // Research-specific palette — deep navy/slate instead of GPT gray
                 ra: {
-                    bg: '#0F1117',        // Deep navy background
-                    surface: '#161822',    // Card/surface
-                    sidebar: '#0B0D14',    // Sidebar dark
-                    input: '#1C1F2E',      // Input field
-                    border: '#252840',     // Borders
-                    text: '#E2E4ED',       // Primary text
-                    muted: '#6B7194',      // Muted/secondary text
-                    accent: '#6C5CE7',     // Primary purple accent
-                    accentLight: '#A29BFE', // Light purple
-                    success: '#00B894',    // Green for success/done
-                    warning: '#FDCB6E',    // Yellow for warnings
-                    info: '#74B9FF',       // Blue for info
-                    error: '#FF6B6B',      // Red for errors
+                    bg: '#07131a',
+                    surface: '#0f2029',
+                    surfaceRaised: '#17303a',
+                    sidebar: '#081019',
+                    input: '#10242d',
+                    border: '#24424d',
+                    text: '#e6f0ef',
+                    muted: '#8ea7aa',
+                    accent: '#6fc7bd',
+                    accentLight: '#b7e4dc',
+                    success: '#5fd19b',
+                    warning: '#f2c572',
+                    info: '#8ac2ff',
+                    error: '#ff8a7a',
                 }
             },
             animation: {

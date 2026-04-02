@@ -6,7 +6,6 @@ It combines live scholarly search, chat-based research sessions, uploaded docume
 
 Live app: [Intelligent Research Architect](https://intelligent-research-architect.vercel.app/)
 
-
 ## Features
 
 - Search academic sources and synthesize paper-focused answers
@@ -80,6 +79,7 @@ Create a `.env` file in the project root:
 GOOGLE_API_KEY=your_google_api_key
 TAVILY_API_KEY=your_tavily_api_key
 GEMINI_MODEL=gemini-2.5-flash
+SEMANTIC_SCHOLAR_API_KEY=optional
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ```
 
@@ -123,3 +123,9 @@ http://127.0.0.1:8001
 - Per-chat memory helps keep research sessions isolated
 - Source-aware outputs make it easier to trace claims back to papers
 - Export tools help turn searches into reusable research artifacts
+
+## Notes
+
+- Best results come from valid API keys and strong scholarly provider coverage
+- Freshness depends on upstream providers like arXiv, OpenAlex, Crossref, Semantic Scholar, and Tavily
+- Python 3.10+ is recommended for better long-term compatibility

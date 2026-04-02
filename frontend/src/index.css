@@ -3,14 +3,22 @@
 @tailwind utilities;
 
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
   line-height: 1.6;
   font-weight: 400;
   color-scheme: dark;
-  background-color: #0F1117;
-  color: #E2E4ED;
+  background:
+    radial-gradient(circle at top left, rgba(111, 199, 189, 0.16), transparent 30%),
+    radial-gradient(circle at top right, rgba(242, 197, 114, 0.12), transparent 26%),
+    linear-gradient(180deg, #08141b 0%, #07131a 38%, #061017 100%);
+  background-color: #07131a;
+  color: #e6f0ef;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  background: #07131a;
 }
 
 body {
@@ -18,6 +26,11 @@ body {
   min-width: 320px;
   min-height: 100vh;
   width: 100%;
+  background: transparent;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 /* === Scrollbar === */
@@ -30,18 +43,18 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #252840;
+  background: #24424d;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #353860;
+  background: #35606b;
 }
 
 /* === Typing cursor animation === */
 .animate-pulse-cursor::after {
   content: "▊";
-  color: #6C5CE7;
+  color: #6fc7bd;
   display: inline-block;
   margin-left: 1px;
   font-size: 0.9em;
@@ -65,7 +78,7 @@ body {
   top: 24px;
   bottom: -8px;
   width: 2px;
-  background: linear-gradient(to bottom, #252840, transparent);
+  background: linear-gradient(to bottom, #24424d, transparent);
 }
 
 .step-connector:last-child::before {
@@ -78,9 +91,9 @@ body {
 }
 
 .source-card:hover {
-  box-shadow: 0 0 20px rgba(108, 92, 231, 0.15);
-  border-color: rgba(108, 92, 231, 0.4);
-  transform: translateY(-1px);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.22);
+  border-color: rgba(111, 199, 189, 0.4);
+  transform: translateY(-2px);
 }
 
 /* === Shimmer loading effect === */
@@ -88,7 +101,7 @@ body {
   background: linear-gradient(
     90deg, 
     #1C1F2E 25%, 
-    #252840 50%, 
+    #24424d 50%, 
     #1C1F2E 75%
   );
   background-size: 200% 100%;
@@ -134,32 +147,36 @@ body {
 /* === Suggestion chip hover === */
 .suggestion-chip {
   transition: all 0.2s ease;
-  border: 1px solid #252840;
-  background: rgba(28, 31, 46, 0.5);
+  border: 1px solid #24424d;
+  background:
+    linear-gradient(180deg, rgba(23, 48, 58, 0.88), rgba(12, 29, 37, 0.9));
+  box-shadow: inset 0 1px 0 rgba(183, 228, 220, 0.05);
 }
 
 .suggestion-chip:hover {
-  border-color: #6C5CE7;
-  background: rgba(108, 92, 231, 0.08);
+  border-color: #6fc7bd;
+  background:
+    linear-gradient(180deg, rgba(24, 56, 66, 0.95), rgba(15, 38, 47, 0.94));
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.1);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
 }
 
 /* === Markdown content styling === */
 .research-markdown h2 {
   font-size: 1.2rem;
-  font-weight: 600;
-  color: #E2E4ED;
+  font-weight: 700;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  color: #f1f6f5;
   margin-top: 1.5rem;
   margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #252840;
+  border-bottom: 1px solid #24424d;
 }
 
 .research-markdown h3 {
   font-size: 1.05rem;
   font-weight: 600;
-  color: #A29BFE;
+  color: #b7e4dc;
   margin-top: 1.25rem;
   margin-bottom: 0.5rem;
 }
@@ -167,18 +184,18 @@ body {
 .research-markdown p {
   margin-bottom: 0.75rem;
   line-height: 1.7;
-  color: #C8CAD8;
+  color: #d2dddc;
 }
 
 .research-markdown a {
-  color: #74B9FF;
+  color: #8ac2ff;
   text-decoration: none;
   border-bottom: 1px solid transparent;
   transition: border-color 0.2s;
 }
 
 .research-markdown a:hover {
-  border-bottom-color: #74B9FF;
+  border-bottom-color: #8ac2ff;
 }
 
 .research-markdown ul, 
@@ -189,25 +206,25 @@ body {
 
 .research-markdown li {
   margin-bottom: 0.35rem;
-  color: #C8CAD8;
+  color: #d2dddc;
 }
 
 .research-markdown strong {
-  color: #E2E4ED;
+  color: #f1f6f5;
   font-weight: 600;
 }
 
 .research-markdown code {
-  background: rgba(108, 92, 231, 0.12);
-  color: #A29BFE;
+  background: rgba(111, 199, 189, 0.12);
+  color: #b7e4dc;
   padding: 0.15rem 0.4rem;
   border-radius: 4px;
   font-size: 0.875em;
 }
 
 .research-markdown pre {
-  background: #0B0D14;
-  border: 1px solid #252840;
+  background: #081019;
+  border: 1px solid #24424d;
   border-radius: 8px;
   padding: 1rem;
   overflow-x: auto;
@@ -217,13 +234,28 @@ body {
 .research-markdown pre code {
   background: none;
   padding: 0;
-  color: #C8CAD8;
+  color: #d2dddc;
 }
 
 .research-markdown blockquote {
-  border-left: 3px solid #6C5CE7;
+  border-left: 3px solid #6fc7bd;
   padding-left: 1rem;
   margin: 1rem 0;
-  color: #6B7194;
+  color: #8ea7aa;
   font-style: italic;
+}
+
+.research-shell {
+  background:
+    radial-gradient(circle at top left, rgba(111, 199, 189, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(242, 197, 114, 0.1), transparent 24%),
+    linear-gradient(180deg, rgba(8, 20, 27, 0.98), rgba(7, 19, 26, 0.98));
+}
+
+.research-panel {
+  background:
+    linear-gradient(180deg, rgba(18, 38, 47, 0.92), rgba(10, 24, 31, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(183, 228, 220, 0.05),
+    0 24px 50px rgba(0, 0, 0, 0.18);
 }

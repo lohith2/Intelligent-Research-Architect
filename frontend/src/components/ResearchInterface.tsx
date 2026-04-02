@@ -41,6 +41,7 @@ interface Message {
     steps?: ResearchStep[];
     sources?: Source[];
     attachments?: AttachedFile[];
+    isStreaming?: boolean;
 }
 
 interface AttachedFile {
@@ -63,6 +64,30 @@ interface Toast {
 }
 
 type ResearchFilter = 'recent' | 'survey' | 'benchmark' | 'seminal';
+
+const isAbortError = (error: unknown) =>
+    error instanceof DOMException && error.name === 'AbortError';
+
+const sanitizeChats = (rawChats: any[]): ChatSession[] => rawChats.map((chat) => {
+    const normalizedMessages = Array.isArray(chat.messages) ? chat.messages.filter((message: Message) => {
+        if (message.role !== 'assistant') return true;
+
+        const hasContent = Boolean(message.content?.trim());
+        const hasSteps = Boolean(message.steps?.length);
+        const hasSources = Boolean(message.sources?.length);
+        return hasContent || hasSteps || hasSources;
+    }).map((message: Message) => ({
+        ...message,
+        isStreaming: false,
+    })) : [];
+
+    return {
+        ...chat,
+        date: new Date(chat.date),
+        files: chat.files || [],
+        messages: normalizedMessages,
+    };
+}).filter((chat) => chat.id);
 
 // ─── Suggestion Chips ─────────────────────────────────────────────
 
@@ -200,9 +225,13 @@ export const ResearchInterface = () => {
     const [toasts, setToasts] = useState<Toast[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const [researchFilters, setResearchFilters] = useState<ResearchFilter[]>([]);
+    const [deletingChatIds, setDeletingChatIds] = useState<string[]>([]);
+    const [activeResearchChatId, setActiveResearchChatId] = useState<string | null>(null);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const activeResearchAbortRef = useRef<AbortController | null>(null);
+    const isMountedRef = useRef(true);
 
     const currentChat = chats.find(c => c.id === currentChatId);
     const messages = currentChat?.messages || [];
@@ -223,6 +252,11 @@ export const ResearchInterface = () => {
 
     const dismissToast = useCallback((id: string) => {
         setToasts(prev => prev.filter(t => t.id !== id));
+    }, []);
+
+    const abortActiveResearch = useCallback(() => {
+        activeResearchAbortRef.current?.abort();
+        activeResearchAbortRef.current = null;
     }, []);
 
     const sourceToBibtex = useCallback((source: Source, index: number) => {
@@ -348,29 +382,49 @@ export const ResearchInterface = () => {
     // ─── Persistence ───────────────────────────────────
 
     useEffect(() => {
+        isMountedRef.current = true;
         const saved = localStorage.getItem('research_chats');
+        const savedCurrentChatId = localStorage.getItem('research_current_chat_id');
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                const restored = parsed.map((c: any) => ({
-                    ...c,
-                    date: new Date(c.date),
-                    files: c.files || []
-                }));
+                const restored = sanitizeChats(parsed);
                 setChats(restored);
-                if (restored.length > 0) setCurrentChatId(restored[0].id);
+                if (restored.length > 0) {
+                    const restoredCurrentChat = restored.find((chat) => chat.id === savedCurrentChatId);
+                    setCurrentChatId(restoredCurrentChat?.id || restored[0].id);
+                }
                 else createNewChat();
             } catch { createNewChat(); }
         } else {
             createNewChat();
         }
-    }, []);
+        return () => {
+            isMountedRef.current = false;
+            abortActiveResearch();
+        };
+    }, [abortActiveResearch]);
 
     useEffect(() => {
         if (chats.length > 0) {
             localStorage.setItem('research_chats', JSON.stringify(chats));
         }
     }, [chats]);
+
+    useEffect(() => {
+        if (currentChatId) {
+            localStorage.setItem('research_current_chat_id', currentChatId);
+        }
+    }, [currentChatId]);
+
+    useEffect(() => {
+        const handlePageHide = () => {
+            abortActiveResearch();
+        };
+
+        window.addEventListener('pagehide', handlePageHide);
+        return () => window.removeEventListener('pagehide', handlePageHide);
+    }, [abortActiveResearch]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -393,6 +447,7 @@ export const ResearchInterface = () => {
     };
 
     const createNewChat = () => {
+        abortActiveResearch();
         const newChat: ChatSession = {
             id: crypto.randomUUID(),
             title: 'New Research',
@@ -406,23 +461,50 @@ export const ResearchInterface = () => {
 
     const deleteChat = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
+        if (deletingChatIds.includes(id)) return;
+
+        const previousChats = chats;
+        const remaining = previousChats.filter(c => c.id !== id);
+        const wasCurrentChat = currentChatId === id;
+        let deleteSucceeded = false;
+
+        if (wasCurrentChat) {
+            abortActiveResearch();
+        }
+
+        setDeletingChatIds(prev => [...prev, id]);
+        setChats(remaining);
+
+        if (wasCurrentChat) {
+            if (remaining.length > 0) {
+                setCurrentChatId(remaining[0].id);
+            } else {
+                setCurrentChatId(null);
+            }
+        }
+
         try {
             await fetch(`${API_BASE_URL}/chat/${id}`, { method: 'DELETE' });
+            deleteSucceeded = true;
+            addToast('Research session deleted', 'success');
         } catch (err) {
             console.error("Failed to cleanup backend chat", err);
-        }
-        setChats(prev => prev.filter(c => c.id !== id));
-        if (currentChatId === id) {
-            const remaining = chats.filter(c => c.id !== id);
-            if (remaining.length > 0) handleChatSwitch(remaining[0].id);
-            else createNewChat();
+            setChats(previousChats);
+            if (wasCurrentChat) {
+                setCurrentChatId(id);
+            }
+            addToast('Delete failed. Please try again.', 'error');
+        } finally {
+            setDeletingChatIds(prev => prev.filter(chatId => chatId !== id));
+            if (isMountedRef.current && deleteSucceeded && wasCurrentChat && remaining.length === 0) {
+                createNewChat();
+            }
         }
     };
 
-    const updateCurrentChatMessages = (updater: (prev: Message[]) => Message[]) => {
-        if (!currentChatId) return;
+    const updateChatMessages = (chatId: string, updater: (prev: Message[]) => Message[]) => {
         setChats(prev => prev.map(chat => {
-            if (chat.id === currentChatId) {
+            if (chat.id === chatId) {
                 return { ...chat, messages: updater(chat.messages) };
             }
             return chat;
@@ -516,6 +598,11 @@ export const ResearchInterface = () => {
     const handleResearch = async () => {
         if (!query.trim() || !currentChatId) return;
 
+        const researchChatId = currentChatId;
+        abortActiveResearch();
+        const abortController = new AbortController();
+        activeResearchAbortRef.current = abortController;
+        setActiveResearchChatId(researchChatId);
         setIsResearching(true);
         const userMsg: Message = {
             role: 'user',
@@ -523,22 +610,23 @@ export const ResearchInterface = () => {
             attachments: [...pendingAttachments]
         };
 
-        updateCurrentChatMessages(prev => [...prev, userMsg]);
+        updateChatMessages(researchChatId, prev => [...prev, userMsg]);
         setPendingAttachments([]);
 
         if (messages.length === 0) {
-            updateChatTitle(currentChatId, query.slice(0, 40) + (query.length > 40 ? '...' : ''));
+            updateChatTitle(researchChatId, query.slice(0, 40) + (query.length > 40 ? '...' : ''));
         }
 
         const currentQuery = query;
         setQuery('');
 
         // Create initial assistant message
-        updateCurrentChatMessages(prev => [...prev, { 
+        updateChatMessages(researchChatId, prev => [...prev, { 
             role: 'assistant', 
             content: '', 
             steps: [], 
-            sources: [] 
+            sources: [],
+            isStreaming: true,
         }]);
 
         const history = messages.map(m => ({ role: m.role, content: m.content }));
@@ -547,14 +635,16 @@ export const ResearchInterface = () => {
             const response = await fetch(`${API_BASE_URL}/research`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: abortController.signal,
                 body: JSON.stringify({
                     query: currentQuery,
-                    chat_id: currentChatId,
+                    chat_id: researchChatId,
                     messages: history,
                     filters: researchFilters,
                 }),
             });
 
+            if (!response.ok) throw new Error(`Research failed with status ${response.status}`);
             if (!response.body) throw new Error('No response body');
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -575,12 +665,14 @@ export const ResearchInterface = () => {
                     }
                     displayedContent += chunk;
 
-                    updateCurrentChatMessages(prev => {
+                    updateChatMessages(researchChatId, prev => {
                         const newMsgs = [...prev];
                         const lastMsg = newMsgs[newMsgs.length - 1];
+                        if (!lastMsg) return prev;
                         lastMsg.content = displayedContent;
                         lastMsg.steps = [...currentSteps];
                         lastMsg.sources = [...currentSources];
+                        lastMsg.isStreaming = !isDone;
                         return newMsgs;
                     });
                 } else if (isDone) {
@@ -615,18 +707,20 @@ export const ResearchInterface = () => {
                                         currentSteps.push(stepData);
                                     }
                                     // Force immediate step update
-                                    updateCurrentChatMessages(prev => {
+                                    updateChatMessages(researchChatId, prev => {
                                         const newMsgs = [...prev];
                                         const lastMsg = newMsgs[newMsgs.length - 1];
+                                        if (!lastMsg) return prev;
                                         lastMsg.steps = [...currentSteps];
                                         return newMsgs;
                                     });
                                 }
                                 else if (data.sources) {
                                     currentSources = data.sources;
-                                    updateCurrentChatMessages(prev => {
+                                    updateChatMessages(researchChatId, prev => {
                                         const newMsgs = [...prev];
                                         const lastMsg = newMsgs[newMsgs.length - 1];
+                                        if (!lastMsg) return prev;
                                         lastMsg.sources = [...currentSources];
                                         return newMsgs;
                                     });
@@ -642,21 +736,58 @@ export const ResearchInterface = () => {
                 isDone = true;
             }
         } catch (error) {
+            if (isAbortError(error)) {
+                updateChatMessages(researchChatId, prev => prev.filter((message, index) => {
+                    if (index !== prev.length - 1) return true;
+                    if (message.role !== 'assistant') return true;
+                    return Boolean(message.content?.trim() || message.steps?.length || message.sources?.length);
+                }).map((message, index, next) => {
+                    if (index !== next.length - 1 || message.role !== 'assistant') return message;
+                    return { ...message, isStreaming: false };
+                }));
+                return;
+            }
             console.error('Research failed:', error);
-            updateCurrentChatMessages(prev => [...prev, { 
-                role: 'assistant', 
-                content: 'Research failed. Please check that the backend is running and try again.' 
-            }]);
+            updateChatMessages(researchChatId, prev => {
+                const next = [...prev];
+                const lastMsg = next[next.length - 1];
+                if (lastMsg?.role === 'assistant') {
+                    lastMsg.content = lastMsg.content?.trim()
+                        ? `${lastMsg.content}\n\nResearch was interrupted before completion. Please try again.`
+                        : 'Research failed. Please check that the backend is running and try again.';
+                    lastMsg.isStreaming = false;
+                    return next;
+                }
+
+                return [...prev, {
+                    role: 'assistant',
+                    content: 'Research failed. Please check that the backend is running and try again.',
+                    isStreaming: false,
+                }];
+            });
             addToast('Research request failed', 'error');
         } finally {
-            setIsResearching(false);
+            if (activeResearchAbortRef.current === abortController) {
+                activeResearchAbortRef.current = null;
+            }
+            if (isMountedRef.current) {
+                setIsResearching(false);
+                setActiveResearchChatId(current => current === researchChatId ? null : current);
+            }
+            updateChatMessages(researchChatId, prev => prev.map((message, index) =>
+                index === prev.length - 1 && message.role === 'assistant'
+                    ? { ...message, isStreaming: false }
+                    : message
+            ));
         }
     };
+
+    const isCurrentChatResearching = isResearching && activeResearchChatId === currentChatId;
 
     // ─── Render ────────────────────────────────────────
 
     return (
-        <div className="flex h-screen w-full bg-ra-bg text-ra-text font-sans overflow-hidden">
+        <div className="research-shell flex min-h-screen h-screen w-full bg-ra-bg text-ra-text font-sans overflow-hidden">
             {/* Sidebar */}
             <Sidebar
                 isOpen={isSidebarOpen}
@@ -666,51 +797,52 @@ export const ResearchInterface = () => {
                 onNewChat={createNewChat}
                 onSelectChat={handleChatSwitch}
                 onDeleteChat={deleteChat}
+                deletingChatIds={deletingChatIds}
             />
 
             {/* Main Area */}
-            <div className="flex-1 flex flex-col relative w-full">
+            <div className="flex-1 flex flex-col relative w-full min-w-0">
                 {/* Header */}
-                <header className="sticky top-0 w-full z-10 px-4 py-3 flex items-center justify-between bg-ra-bg/80 backdrop-blur-xl border-b border-ra-border/50">
-                    <div className="flex items-center gap-3">
+                <header className="sticky top-0 w-full z-10 px-3 sm:px-4 lg:px-6 py-3 flex items-start sm:items-center justify-between gap-3 bg-ra-bg/80 backdrop-blur-xl border-b border-ra-border/50">
+                    <div className="flex items-center gap-3 min-w-0">
                         <button 
                             onClick={() => setIsSidebarOpen(true)} 
                             className="p-2 text-ra-muted hover:text-ra-text hover:bg-ra-surface rounded-lg transition-all md:hidden"
                         >
                             <Menu className="w-5 h-5" />
                         </button>
-                        <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-ra-accent to-ra-accentLight flex items-center justify-center">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-ra-accent to-ra-accentLight flex items-center justify-center shadow-[0_14px_30px_rgba(0,0,0,0.16)] shrink-0">
                                 <Compass className="w-4.5 h-4.5 text-white" />
                             </div>
-                            <div className="flex flex-col">
-                                <span className="font-semibold text-ra-text text-[15px] tracking-tight leading-tight">Research Architect</span>
-                                <span className="text-[10px] text-ra-muted leading-tight">AI Research Assistant</span>
+                            <div className="flex flex-col min-w-0">
+                                <span className="font-semibold font-serif text-ra-text text-[15px] sm:text-base tracking-tight leading-tight truncate">Research Architect</span>
+                                <span className="text-[10px] uppercase tracking-[0.24em] text-ra-muted leading-tight truncate">Analysis Workspace</span>
                             </div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-end gap-2 flex-wrap">
                         {messages.length > 0 && (
                             <>
                                 {allSources.length > 0 && (
                                     <>
                                         <button 
                                             onClick={exportReadingPath}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-ra-muted hover:text-ra-text bg-ra-surface border border-ra-border rounded-lg transition-all hover:border-ra-accent/30"
+                                            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs text-ra-muted hover:text-ra-text bg-ra-surface border border-ra-border rounded-lg transition-all hover:border-ra-accent/30"
                                         >
                                             <Compass className="w-3.5 h-3.5" />
                                             Reading Path
                                         </button>
                                         <button 
                                             onClick={exportReadingList}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-ra-muted hover:text-ra-text bg-ra-surface border border-ra-border rounded-lg transition-all hover:border-ra-accent/30"
+                                            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs text-ra-muted hover:text-ra-text bg-ra-surface border border-ra-border rounded-lg transition-all hover:border-ra-accent/30"
                                         >
                                             <BookOpen className="w-3.5 h-3.5" />
                                             Reading List
                                         </button>
                                         <button 
                                             onClick={exportBibtex}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-ra-muted hover:text-ra-text bg-ra-surface border border-ra-border rounded-lg transition-all hover:border-ra-accent/30"
+                                            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs text-ra-muted hover:text-ra-text bg-ra-surface border border-ra-border rounded-lg transition-all hover:border-ra-accent/30"
                                         >
                                             <BookOpen className="w-3.5 h-3.5" />
                                             BibTeX
@@ -730,8 +862,8 @@ export const ResearchInterface = () => {
                 </header>
 
                 {/* Messages Area */}
-                <main className="flex-1 overflow-y-auto pb-44 px-4 scroll-smooth flex flex-col">
-                    <div className={`w-full max-w-3xl mx-auto space-y-6 pt-4 flex-grow flex flex-col ${messages.length === 0 ? 'justify-center' : ''}`}>
+                <main className="flex-1 overflow-y-auto pb-56 sm:pb-52 px-3 sm:px-4 lg:px-6 scroll-smooth flex flex-col">
+                    <div className={`w-full max-w-5xl mx-auto space-y-6 pt-4 sm:pt-6 flex-grow flex flex-col ${messages.length === 0 ? 'justify-center' : ''}`}>
                         
                         {/* Empty State */}
                         {messages.length === 0 && (
@@ -739,22 +871,40 @@ export const ResearchInterface = () => {
                                 initial={{ opacity: 0, y: 16 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.5 }}
-                                className="flex flex-col items-center justify-center text-center space-y-8 flex-grow"
+                                className="flex flex-col items-center justify-center text-center space-y-8 flex-grow py-6"
                             >
-                                <div className="space-y-4">
-                                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ra-accent/20 to-ra-accentLight/10 border border-ra-accent/20 flex items-center justify-center mx-auto">
+                                <div className="space-y-4 max-w-2xl">
+                                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ra-accent/20 to-ra-accentLight/10 border border-ra-accent/20 flex items-center justify-center mx-auto shadow-[0_20px_40px_rgba(0,0,0,0.18)]">
                                         <Compass className="w-8 h-8 text-ra-accent" />
                                     </div>
-                                    <h1 className="text-2xl font-semibold text-ra-text">
-                                        What would you like to research?
+                                    <div className="inline-flex items-center gap-2 rounded-full border border-ra-border/80 bg-ra-surface/60 px-3 py-1 text-[11px] uppercase tracking-[0.26em] text-ra-muted">
+                                        <Search className="w-3 h-3 text-ra-accent" />
+                                        Research Console
+                                    </div>
+                                    <h1 className="text-3xl sm:text-4xl font-semibold font-serif text-ra-text leading-tight">
+                                        Build a literature brief that feels publication-ready.
                                     </h1>
-                                    <p className="text-sm text-ra-muted max-w-md">
-                                        I search scholarly sources, analyze papers and PDFs, and synthesize literature with citations, gaps, and reading paths.
+                                    <p className="text-sm sm:text-base text-ra-muted max-w-2xl">
+                                        Search scholarly sources, analyze PDFs, compare findings, and turn messy evidence into a structured research trail with citations and reading paths.
                                     </p>
                                 </div>
 
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-3xl">
+                                    {[
+                                        { label: 'Paper Search', value: 'Academic sources first' },
+                                        { label: 'Evidence Trail', value: 'Citations stay attached' },
+                                        { label: 'Benchmarks', value: 'Datasets and evaluations' },
+                                        { label: 'Reading Path', value: 'Export next-step lists' },
+                                    ].map((item) => (
+                                        <div key={item.label} className="research-panel rounded-2xl border border-ra-border/70 px-4 py-3 text-left">
+                                            <p className="text-[11px] uppercase tracking-[0.22em] text-ra-muted">{item.label}</p>
+                                            <p className="text-sm text-ra-text mt-1">{item.value}</p>
+                                        </div>
+                                    ))}
+                                </div>
+
                                 {/* Suggestion Chips */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-3xl">
                                     {SUGGESTIONS.map((suggestion, idx) => (
                                         <motion.button
                                             key={idx}
@@ -765,15 +915,15 @@ export const ResearchInterface = () => {
                                                 setQuery(suggestion.text);
                                                 textareaRef.current?.focus();
                                             }}
-                                            className="suggestion-chip text-left p-3.5 rounded-xl group"
+                                            className="suggestion-chip text-left p-4 rounded-2xl group"
                                         >
                                             <div className="flex items-start gap-3">
                                                 <div className="p-1.5 rounded-lg bg-ra-accent/10 text-ra-accent group-hover:bg-ra-accent/20 transition-colors shrink-0">
                                                     <suggestion.icon className="w-4 h-4" />
                                                 </div>
                                                 <div>
-                                                    <p className="text-[10px] font-medium text-ra-accent uppercase tracking-wider mb-1">{suggestion.category}</p>
-                                                    <p className="text-xs text-ra-muted group-hover:text-ra-text transition-colors leading-relaxed">{suggestion.text}</p>
+                                                    <p className="text-[10px] font-medium text-ra-accent uppercase tracking-[0.24em] mb-1">{suggestion.category}</p>
+                                                    <p className="text-sm text-ra-muted group-hover:text-ra-text transition-colors leading-relaxed">{suggestion.text}</p>
                                                 </div>
                                             </div>
                                         </motion.button>
@@ -798,19 +948,19 @@ export const ResearchInterface = () => {
                                         </div>
                                     )}
 
-                                    <div className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                    <div className={`flex flex-col w-full max-w-[92%] sm:max-w-[88%] lg:max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                                         {/* Message bubble */}
-                                        <div className={`px-4 py-3 rounded-2xl text-[14px] leading-relaxed ${
+                                        <div className={`w-full px-4 py-3 rounded-2xl text-[14px] leading-relaxed ${
                                             msg.role === 'user'
-                                                ? 'bg-ra-accent/15 text-ra-text border border-ra-accent/20 rounded-br-sm'
-                                                : 'text-ra-text pl-0'
+                                                ? 'bg-ra-accent/12 text-ra-text border border-ra-accent/20 rounded-br-sm shadow-[0_18px_36px_rgba(0,0,0,0.16)]'
+                                                : 'text-ra-text research-panel border border-ra-border/60 rounded-3xl rounded-tl-sm'
                                         }`}>
                                             {/* Research Steps Timeline */}
                                             {msg.role === 'assistant' && msg.steps && msg.steps.length > 0 && (
                                                 <motion.div
                                                     initial={{ opacity: 0 }}
                                                     animate={{ opacity: 1 }}
-                                                    className="mb-4 py-3 px-3 rounded-lg bg-ra-surface/60 border border-ra-border/50"
+                                                    className="mb-4 py-3 px-3 rounded-xl bg-ra-surface/60 border border-ra-border/50"
                                                 >
                                                     <p className="text-[10px] font-medium text-ra-muted uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                                                         <Search className="w-3 h-3" />
@@ -834,7 +984,7 @@ export const ResearchInterface = () => {
                                             {/* Message content */}
                                             {msg.content ? (
                                                 <div className={`research-markdown w-full ${
-                                                    (isResearching && idx === messages.length - 1 && msg.role === 'assistant') 
+                                                    (msg.isStreaming && idx === messages.length - 1 && msg.role === 'assistant') 
                                                         ? 'animate-pulse-cursor' : ''
                                                 }`}>
                                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -876,7 +1026,7 @@ export const ResearchInterface = () => {
                                                     <BookOpen className="w-3 h-3" />
                                                     Sources ({msg.sources.length})
                                                 </p>
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
                                                     {msg.sources.map((source, sIdx) => (
                                                         <SourceCard key={sIdx} source={source} index={sIdx} />
                                                     ))}
@@ -899,8 +1049,8 @@ export const ResearchInterface = () => {
                 </main>
 
                 {/* Input Area */}
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-ra-bg via-ra-bg to-transparent pt-8 pb-6 px-4 z-40">
-                    <div className="w-full max-w-3xl mx-auto relative">
+                <div className="absolute bottom-0 w-full bg-gradient-to-t from-ra-bg via-ra-bg to-transparent pt-8 pb-[calc(1.25rem+env(safe-area-inset-bottom))] px-3 sm:px-4 lg:px-6 z-40">
+                    <div className="w-full max-w-5xl mx-auto relative">
                         {/* Pending Attachments */}
                         <AnimatePresence>
                             {pendingAttachments.length > 0 && (
@@ -928,7 +1078,7 @@ export const ResearchInterface = () => {
                         </AnimatePresence>
 
                         {/* Input Box */}
-                        <div className="bg-ra-input border border-ra-border rounded-xl p-2 flex items-end gap-2 shadow-lg shadow-black/20 focus-within:border-ra-accent/40 transition-all">
+                        <div className="research-panel bg-ra-input border border-ra-border rounded-2xl p-2 sm:p-3 flex items-end gap-2 shadow-lg shadow-black/20 focus-within:border-ra-accent/40 transition-all">
                             <label className={`p-2 rounded-lg hover:bg-ra-accent/10 text-ra-muted hover:text-ra-accent cursor-pointer transition-all mb-0.5 ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
                                 <input
                                     type="file"
@@ -950,67 +1100,71 @@ export const ResearchInterface = () => {
                                 )}
                             </label>
 
-                            <textarea
-                                ref={textareaRef}
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleResearch();
-                                    }
-                                }}
-                                placeholder="Ask for papers, literature reviews, benchmarks, or document analysis..."
-                                disabled={isResearching}
-                                className="flex-1 bg-transparent border-none text-ra-text placeholder-ra-muted focus:ring-0 focus:outline-none text-[14px] py-2.5 px-2 max-h-48 resize-none overflow-y-auto"
-                                rows={1}
-                            />
+                            <div className="flex-1 min-w-0">
+                                <textarea
+                                    ref={textareaRef}
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleResearch();
+                                        }
+                                    }}
+                                    placeholder="Ask for papers, literature reviews, benchmarks, or document analysis..."
+                                    disabled={isCurrentChatResearching}
+                                    className="w-full bg-transparent border-none text-ra-text placeholder-ra-muted focus:ring-0 focus:outline-none text-[14px] py-2.5 px-2 max-h-48 resize-none overflow-y-auto"
+                                    rows={1}
+                                />
+                                <div className="flex flex-wrap gap-2 px-2 pb-1 pt-1">
+                                    {RESEARCH_FILTER_OPTIONS.map((option) => {
+                                        const active = researchFilters.includes(option.key);
+                                        return (
+                                            <button
+                                                key={option.key}
+                                                type="button"
+                                                onClick={() => toggleResearchFilter(option.key)}
+                                                className={`rounded-full border px-3 py-1 text-[11px] transition-colors ${
+                                                    active
+                                                        ? 'border-ra-accent/50 bg-ra-accent/15 text-ra-text'
+                                                        : 'border-ra-border bg-ra-surface/40 text-ra-muted hover:text-ra-text'
+                                                }`}
+                                                title={option.description}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
 
                             <button
                                 onClick={handleResearch}
-                                disabled={isResearching || !query.trim()}
-                                className="p-2.5 rounded-lg bg-ra-accent hover:bg-ra-accentLight text-white disabled:opacity-30 disabled:bg-ra-surface transition-all mb-0.5"
+                                disabled={isCurrentChatResearching || !query.trim()}
+                                className="p-2.5 rounded-xl bg-ra-accent hover:bg-ra-accentLight text-[#04262a] disabled:text-ra-muted disabled:opacity-40 disabled:bg-ra-surface transition-all mb-0.5 shrink-0"
                             >
-                                {isResearching ? (
+                                {isCurrentChatResearching ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 ) : (
                                     <Send className="w-4 h-4" />
                                 )}
                             </button>
                         </div>
-
-                        <div className="flex flex-wrap gap-2 mt-3 px-1">
-                            {RESEARCH_FILTER_OPTIONS.map((filter) => {
-                                const isActive = researchFilters.includes(filter.key);
-                                return (
-                                    <button
-                                        key={filter.key}
-                                        type="button"
-                                        onClick={() => toggleResearchFilter(filter.key)}
-                                        className={`px-3 py-1.5 rounded-full border text-xs transition-all ${
-                                            isActive
-                                                ? 'bg-ra-accent/15 text-ra-text border-ra-accent/40'
-                                                : 'bg-ra-surface/70 text-ra-muted border-ra-border hover:text-ra-text hover:border-ra-accent/25'
-                                        }`}
-                                        title={filter.description}
-                                    >
-                                        {filter.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
-
                         <div className="text-center mt-2">
                                 <span className="text-[10px] text-ra-muted/50">
                                 Research Architect searches scholarly sources and your documents to support literature review work
                             </span>
+                        </div>
+                        <div className="flex items-center justify-between px-1 pt-2 text-[11px] text-ra-muted/80">
+                            <span>Shift+Enter for a new line</span>
+                            <span className="hidden sm:inline">Upload notes, PDFs, or screenshots to ground the answer</span>
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* Toast Container */}
-            <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-2">
+            <div className="fixed bottom-24 left-3 right-3 sm:left-auto sm:right-4 z-50 flex flex-col gap-2 sm:max-w-sm">
                 <AnimatePresence>
                     {toasts.map(toast => (
                         <ToastNotification key={toast.id} toast={toast} onDismiss={dismissToast} />
