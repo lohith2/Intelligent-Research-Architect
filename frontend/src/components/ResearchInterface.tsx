@@ -236,6 +236,7 @@ export const ResearchInterface = () => {
     const currentChat = chats.find(c => c.id === currentChatId);
     const messages = currentChat?.messages || [];
     const allSources = messages.flatMap(message => message.sources || []);
+    const lastMessage = messages[messages.length - 1];
 
     const toggleResearchFilter = (filter: ResearchFilter) => {
         setResearchFilters(prev =>
@@ -428,7 +429,7 @@ export const ResearchInterface = () => {
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages.length]);
+    }, [messages.length, lastMessage?.content, lastMessage?.steps?.length, lastMessage?.sources?.length]);
 
     // Auto-resize textarea
     useEffect(() => {
@@ -658,7 +659,7 @@ export const ResearchInterface = () => {
             // Smooth typing interval
             const typingInterval = setInterval(() => {
                 if (tokenQueue.length > 0) {
-                    const speed = tokenQueue.length > 50 ? 8 : (tokenQueue.length > 20 ? 4 : 1);
+                    const speed = tokenQueue.length > 240 ? 64 : tokenQueue.length > 120 ? 36 : tokenQueue.length > 40 ? 18 : 8;
                     let chunk = '';
                     for (let i = 0; i < speed && tokenQueue.length > 0; i++) {
                         chunk += tokenQueue.shift();
@@ -678,7 +679,7 @@ export const ResearchInterface = () => {
                 } else if (isDone) {
                     clearInterval(typingInterval);
                 }
-            }, 12);
+            }, 8);
 
             try {
                 while (true) {
@@ -734,6 +735,20 @@ export const ResearchInterface = () => {
                 }
             } finally {
                 isDone = true;
+                if (tokenQueue.length > 0) {
+                    displayedContent += tokenQueue.join('');
+                    tokenQueue.length = 0;
+                    updateChatMessages(researchChatId, prev => {
+                        const newMsgs = [...prev];
+                        const lastMsg = newMsgs[newMsgs.length - 1];
+                        if (!lastMsg) return prev;
+                        lastMsg.content = displayedContent;
+                        lastMsg.steps = [...currentSteps];
+                        lastMsg.sources = [...currentSources];
+                        lastMsg.isStreaming = false;
+                        return newMsgs;
+                    });
+                }
             }
         } catch (error) {
             if (isAbortError(error)) {
@@ -787,7 +802,7 @@ export const ResearchInterface = () => {
     // ─── Render ────────────────────────────────────────
 
     return (
-        <div className="research-shell flex min-h-screen h-screen w-full bg-ra-bg text-ra-text font-sans overflow-hidden">
+        <div className="research-shell flex min-h-[100dvh] h-[100dvh] w-full bg-ra-bg text-ra-text font-sans overflow-hidden">
             {/* Sidebar */}
             <Sidebar
                 isOpen={isSidebarOpen}
@@ -862,8 +877,8 @@ export const ResearchInterface = () => {
                 </header>
 
                 {/* Messages Area */}
-                <main className="flex-1 overflow-y-auto pb-56 sm:pb-52 px-3 sm:px-4 lg:px-6 scroll-smooth flex flex-col">
-                    <div className={`w-full max-w-5xl mx-auto space-y-6 pt-4 sm:pt-6 flex-grow flex flex-col ${messages.length === 0 ? 'justify-center' : ''}`}>
+                <main className="research-main-scroll flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 lg:px-6 scroll-smooth flex flex-col">
+                    <div className={`w-full max-w-5xl mx-auto space-y-5 pt-4 sm:pt-6 pb-4 sm:pb-6 flex-grow flex flex-col ${messages.length === 0 ? 'justify-center' : ''}`}>
                         
                         {/* Empty State */}
                         {messages.length === 0 && (
@@ -871,7 +886,7 @@ export const ResearchInterface = () => {
                                 initial={{ opacity: 0, y: 16 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.5 }}
-                                className="flex flex-col items-center justify-center text-center space-y-8 flex-grow py-6"
+                                className="flex flex-col items-center justify-center text-center space-y-6 flex-grow py-6"
                             >
                                 <div className="space-y-4 max-w-2xl">
                                     <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ra-accent/20 to-ra-accentLight/10 border border-ra-accent/20 flex items-center justify-center mx-auto shadow-[0_20px_40px_rgba(0,0,0,0.18)]">
@@ -881,15 +896,15 @@ export const ResearchInterface = () => {
                                         <Search className="w-3 h-3 text-ra-accent" />
                                         Research Console
                                     </div>
-                                    <h1 className="text-3xl sm:text-4xl font-semibold font-serif text-ra-text leading-tight">
+                                    <h1 className="text-2xl sm:text-4xl font-semibold font-serif text-ra-text leading-tight">
                                         Build a literature brief that feels publication-ready.
                                     </h1>
-                                    <p className="text-sm sm:text-base text-ra-muted max-w-2xl">
+                                    <p className="text-sm sm:text-base text-ra-muted max-w-2xl px-2 sm:px-0">
                                         Search scholarly sources, analyze PDFs, compare findings, and turn messy evidence into a structured research trail with citations and reading paths.
                                     </p>
                                 </div>
 
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-3xl">
+                                <div className="hidden sm:grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-3xl">
                                     {[
                                         { label: 'Paper Search', value: 'Academic sources first' },
                                         { label: 'Evidence Trail', value: 'Citations stay attached' },
@@ -1049,7 +1064,7 @@ export const ResearchInterface = () => {
                 </main>
 
                 {/* Input Area */}
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-ra-bg via-ra-bg to-transparent pt-8 pb-[calc(1.25rem+env(safe-area-inset-bottom))] px-3 sm:px-4 lg:px-6 z-40">
+                <div className="w-full border-t border-ra-border/40 bg-ra-bg/95 backdrop-blur-xl px-3 sm:px-4 lg:px-6 pt-3 sm:pt-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-4">
                     <div className="w-full max-w-5xl mx-auto relative">
                         {/* Pending Attachments */}
                         <AnimatePresence>
@@ -1078,8 +1093,8 @@ export const ResearchInterface = () => {
                         </AnimatePresence>
 
                         {/* Input Box */}
-                        <div className="research-panel bg-ra-input border border-ra-border rounded-2xl p-2 sm:p-3 flex items-end gap-2 shadow-lg shadow-black/20 focus-within:border-ra-accent/40 transition-all">
-                            <label className={`p-2 rounded-lg hover:bg-ra-accent/10 text-ra-muted hover:text-ra-accent cursor-pointer transition-all mb-0.5 ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
+                        <div className="research-panel bg-ra-input border border-ra-border rounded-[22px] p-2 sm:p-3 flex items-end gap-2 shadow-lg shadow-black/20 focus-within:border-ra-accent/40 transition-all">
+                            <label className={`p-2 rounded-lg hover:bg-ra-accent/10 text-ra-muted hover:text-ra-accent cursor-pointer transition-all mb-0.5 shrink-0 ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
                                 <input
                                     type="file"
                                     className="hidden"
@@ -1113,7 +1128,7 @@ export const ResearchInterface = () => {
                                     }}
                                     placeholder="Ask for papers, literature reviews, benchmarks, or document analysis..."
                                     disabled={isCurrentChatResearching}
-                                    className="w-full bg-transparent border-none text-ra-text placeholder-ra-muted focus:ring-0 focus:outline-none text-[14px] py-2.5 px-2 max-h-48 resize-none overflow-y-auto"
+                                    className="w-full bg-transparent border-none text-ra-text placeholder-ra-muted focus:ring-0 focus:outline-none text-base sm:text-[14px] py-2 px-2 max-h-32 sm:max-h-48 resize-none overflow-y-auto"
                                     rows={1}
                                 />
                                 <div className="flex flex-wrap gap-2 px-2 pb-1 pt-1">
@@ -1150,14 +1165,9 @@ export const ResearchInterface = () => {
                                 )}
                             </button>
                         </div>
-                        <div className="text-center mt-2">
-                                <span className="text-[10px] text-ra-muted/50">
-                                Research Architect searches scholarly sources and your documents to support literature review work
-                            </span>
-                        </div>
-                        <div className="flex items-center justify-between px-1 pt-2 text-[11px] text-ra-muted/80">
-                            <span>Shift+Enter for a new line</span>
-                            <span className="hidden sm:inline">Upload notes, PDFs, or screenshots to ground the answer</span>
+                        <div className="hidden sm:flex items-center justify-between px-1 pt-2 text-[11px] text-ra-muted/80">
+                            <span>Press Enter to send</span>
+                            <span>Upload notes, PDFs, or screenshots to ground the answer</span>
                         </div>
                     </div>
                 </div>
