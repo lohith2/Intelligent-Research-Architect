@@ -133,3 +133,7 @@ Summarize this uploaded paper and list its datasets, metrics, and limitations
 - Best results with valid API keys and strong scholarly provider coverage
 - Answer freshness depends on Tavily and Semantic Scholar index recency
 - Gemini 2.5 Flash is used by default — swap `GEMINI_MODEL` for Pro if needed
+
+## License
+
+MIT © 2026 Lohith Reddy Kondreddy
